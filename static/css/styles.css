@@ -1,0 +1,13 @@
+/* Shared fallback styles. Page-specific styles remain in the templates. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+img {
+  max-width: 100%;
+}

@@ -268,8 +268,7 @@ def download_daywise_csv(request, date):
     writer = csv.writer(response)
     writer.writerow([
         "Student Roll No", "Student Name", "Status", "Date", "Time",
-        "Period 1", "Period 2", "Period 3", "Period 4", "Period 5",
-        "Period 6", "Period 7",
+        "Period 1", "Period 2", "Period 3",
     ])
 
     for rec in records:

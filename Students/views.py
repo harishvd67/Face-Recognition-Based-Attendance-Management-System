@@ -18,7 +18,6 @@ from django.core.files.base import ContentFile
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 
-from insightface.app import FaceAnalysis
 from .models import UserProfile
 
 MIN_FACE_IMAGES = 30
@@ -37,14 +36,19 @@ def next_roll_number():
     next_number = max(numbers, default=0) + 1
     return f"{ROLL_NUMBER_PREFIX}{next_number:04d}"
 
-# ==========================================
-# LOAD ARCFACE MODEL (ONCE)
-# ==========================================
-face_app = FaceAnalysis(name="buffalo_l")
-face_app.prepare(ctx_id=0, det_size=(640, 640))
-
 EMBEDDING_DIR = os.path.join(settings.BASE_DIR, "embeddings")
 os.makedirs(EMBEDDING_DIR, exist_ok=True)
+face_app = None
+
+
+def get_face_app():
+    global face_app
+    if face_app is None:
+        from insightface.app import FaceAnalysis
+
+        face_app = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+        face_app.prepare(ctx_id=0, det_size=(640, 640))
+    return face_app
 
 
 # ==========================================
@@ -134,7 +138,7 @@ def student_register(request):
                 if img is None:
                     continue
 
-                faces = face_app.get(img)
+                faces = get_face_app().get(img)
                 if not faces:
                     continue
 
@@ -243,7 +247,7 @@ def validate_registration_face(request):
         )
         if frame is None:
             return JsonResponse({"face_detected": False})
-        return JsonResponse({"face_detected": bool(face_app.get(frame))})
+        return JsonResponse({"face_detected": bool(get_face_app().get(frame))})
     except Exception:
         return JsonResponse({"face_detected": False})
 
@@ -307,12 +311,6 @@ def get_current_period():
     return None
 
 # =====================================================
-# LOAD ARCFACE MODEL
-# =====================================================
-face_app = FaceAnalysis(name="buffalo_l")
-face_app.prepare(ctx_id=0, det_size=(640, 640))
-
-# =====================================================
 # LOAD REGISTERED EMBEDDINGS
 # =====================================================
 def load_known_faces():
@@ -323,9 +321,9 @@ def load_known_faces():
     for file in os.listdir(EMBEDDING_DIR):
         if file.endswith(".npy"):
             student_id = file.replace(".npy", "")
-            known[student_id] = np.load(
-                os.path.join(EMBEDDING_DIR, file)
-            )
+            embedding = np.load(os.path.join(EMBEDDING_DIR, file))
+            if embedding.ndim == 1 and embedding.size:
+                known[student_id] = embedding
     return known
 
 KNOWN_FACES = load_known_faces()
@@ -334,7 +332,10 @@ KNOWN_FACES = load_known_faces()
 # COSINE DISTANCE
 # =====================================================
 def cosine_distance(a, b):
-    return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    denominator = np.linalg.norm(a) * np.linalg.norm(b)
+    if denominator == 0 or a.shape != b.shape:
+        return 1.0
+    return 1 - np.dot(a, b) / denominator
 
 # =====================================================
 # CAMERA INIT
@@ -392,6 +393,8 @@ def realtime(request):
 
     def generate_frames():
         init_live_capture()
+        if live_cap is None:
+            return
         today = timezone.localdate()
 
         while True:
@@ -400,7 +403,7 @@ def realtime(request):
                 break
 
             period = get_current_period()
-            faces = face_app.get(frame)
+            faces = get_face_app().get(frame)
 
             for face in faces:
                 emb = face.embedding
@@ -482,7 +485,10 @@ def auto_attendance(request):
                 "message": "Attendance is available only during a scheduled class period."
             })
 
-        faces = face_app.get(frame)
+        if frame is None:
+            return JsonResponse({"error": "Invalid image"}, status=400)
+
+        faces = get_face_app().get(frame)
         results = []
 
         for face in faces:
